@@ -1,3 +1,4 @@
+
 package com.jjrapps.aquihaytomate.data.local.datastore
 
 import androidx.datastore.core.DataStore
@@ -25,7 +26,7 @@ import kotlinx.coroutines.flow.map
  * state changes on every transition.
  *
  * Every setter coerces into the range declared in [TimerSettings]. Values are clamped on the way in
- * *and* on the way out, so a hand-edited file or a value written by an older build can never produce a
+ * and on the way out, so a hand-edited file or a value written by an older build can never produce a
  * zero-length pomodoro.
  */
 @Singleton
@@ -104,6 +105,34 @@ class SettingsDataSource @Inject constructor(
 
     suspend fun setLanguage(language: AppLanguage) = edit(Keys.LANGUAGE) { language.id }
 
+    // Restore settings from an imported backup.
+    suspend fun restore(settings: TimerSettings) {
+        dataStore.edit { prefs ->
+            prefs[Keys.FOCUS_MINUTES] = settings.focusMinutes
+            prefs[Keys.SHORT_BREAK_MINUTES] = settings.shortBreakMinutes
+            prefs[Keys.LONG_BREAK_MINUTES] = settings.longBreakMinutes
+            prefs[Keys.POMODOROS_PER_CYCLE] = settings.pomodorosPerCycle
+            prefs[Keys.AUTO_START_BREAK] = settings.autoStartBreak
+            prefs[Keys.AUTO_START_FOCUS] = settings.autoStartFocus
+            prefs[Keys.FOCUS_ALERT_SOUND] = settings.focusAlertSound.id
+            prefs[Keys.BREAK_ALERT_SOUND] = settings.breakAlertSound.id
+            prefs[Keys.FOCUS_ALERT_REPEATS] = settings.focusAlertRepeats
+            prefs[Keys.BREAK_ALERT_REPEATS] = settings.breakAlertRepeats
+            prefs[Keys.VIBRATION_SECONDS] = settings.vibrationSeconds
+            prefs[Keys.KEEP_SCREEN_ON] = settings.keepScreenOn.id
+            prefs[Keys.DAILY_GOAL] = settings.dailyGoal
+            prefs[Keys.WIDGET_BACKGROUND] = settings.widgetBackground.id
+            prefs[Keys.LANGUAGE] = settings.language.id
+            prefs[Keys.LIQUID_ANIMATION] = settings.liquidAnimationEnabled
+            prefs[Keys.ONBOARDING_DONE] = settings.onboardingDone
+
+            prefs.remove(Keys.RETIRED_AUTO_START_NEXT)
+            prefs.remove(Keys.RETIRED_ALERT_SOUND)
+            prefs.remove(Keys.RETIRED_KEEP_SCREEN_ON)
+            prefs.remove(Keys.KEEP_SCREEN_ON_RESTORE)
+        }
+    }
+
     private suspend fun <T> edit(key: Preferences.Key<T>, value: () -> T) {
         dataStore.edit { it[key] = value() }
     }
@@ -124,18 +153,12 @@ class SettingsDataSource @Inject constructor(
             ),
             pomodorosPerCycle = (this[Keys.POMODOROS_PER_CYCLE] ?: defaults.pomodorosPerCycle)
                 .coerceIn(TimerSettings.POMODOROS_PER_CYCLE_RANGE),
-            // Falls back to the single auto_start_next flag these two replaced, so anyone who had it on
-            // keeps chaining both ways until they touch the new switches. Reading a retired key is
-            // cheaper than a migration and it costs one line.
             autoStartBreak = this[Keys.AUTO_START_BREAK]
                 ?: this[Keys.RETIRED_AUTO_START_NEXT]
                 ?: defaults.autoStartBreak,
             autoStartFocus = this[Keys.AUTO_START_FOCUS]
                 ?: this[Keys.RETIRED_AUTO_START_NEXT]
                 ?: defaults.autoStartFocus,
-            // Ambos caen en el `alert_sound` único que sustituyen, así que quien ya había elegido un
-            // sonido lo conserva en las dos fases hasta que toque uno de los dos ajustes nuevos. Leer una
-            // clave retirada cuesta una línea y evita una migración.
             focusAlertSound = AlertSound.fromId(
                 this[Keys.FOCUS_ALERT_SOUND] ?: this[Keys.RETIRED_ALERT_SOUND],
                 fallback = defaults.focusAlertSound,
@@ -150,10 +173,6 @@ class SettingsDataSource @Inject constructor(
                 .coerceIn(TimerSettings.ALERT_REPEATS_RANGE),
             vibrationSeconds = (this[Keys.VIBRATION_SECONDS] ?: defaults.vibrationSeconds)
                 .coerceIn(TimerSettings.VIBRATION_SECONDS_RANGE),
-            // El interruptor que fue este ajuste solo se lee cuando estaba encendido, y entonces vale
-            // ALWAYS: era literalmente lo que hacía. Apagado no se traduce a NEVER, porque respondía a
-            // otra pregunta —«no apagues nunca la pantalla»— y decir que no a esa no es decir que no a
-            // «mantenla mientras cargas», que es el nuevo valor por defecto para todo el mundo.
             keepScreenOn = keepScreenOnMode(defaults.keepScreenOn),
             dailyGoal = (this[Keys.DAILY_GOAL] ?: defaults.dailyGoal)
                 .coerceIn(TimerSettings.DAILY_GOAL_RANGE),
@@ -184,33 +203,15 @@ class SettingsDataSource @Inject constructor(
         val POMODOROS_PER_CYCLE = intPreferencesKey("pomodoros_per_cycle")
         val AUTO_START_BREAK = booleanPreferencesKey("auto_start_break")
         val AUTO_START_FOCUS = booleanPreferencesKey("auto_start_focus")
-
-        /**
-         * The single switch that became the two above. Never written any more, only read as their
-         * fallback; deleting it would silently turn the setting off for whoever had it on.
-         */
         val RETIRED_AUTO_START_NEXT = booleanPreferencesKey("auto_start_next")
         val FOCUS_ALERT_SOUND = stringPreferencesKey("focus_alert_sound")
         val BREAK_ALERT_SOUND = stringPreferencesKey("break_alert_sound")
         val FOCUS_ALERT_REPEATS = intPreferencesKey("focus_alert_repeats")
         val BREAK_ALERT_REPEATS = intPreferencesKey("break_alert_repeats")
-
-        /**
-         * El sonido único que se convirtió en los dos de arriba. Ya no se escribe, solo se lee como su
-         * respaldo; borrarlo devolvería a los valores por defecto a quien hubiera elegido otro.
-         */
         val RETIRED_ALERT_SOUND = stringPreferencesKey("alert_sound")
         val VIBRATION_SECONDS = intPreferencesKey("vibration_seconds")
         val KEEP_SCREEN_ON = stringPreferencesKey("keep_screen_on_mode")
-
-        /**
-         * El interruptor de sí/no que se convirtió en los tres modos de arriba. Ya no se escribe, solo se
-         * lee para que quien lo tuviera encendido siga con la pantalla siempre despierta. Lleva otro
-         * nombre de clave a propósito: leer un booleano guardado como texto revienta.
-         */
         val RETIRED_KEEP_SCREEN_ON = booleanPreferencesKey("keep_screen_on")
-
-        /** The mode the Timer screen's button replaced with `always`, to give it back when switched off. */
         val KEEP_SCREEN_ON_RESTORE = stringPreferencesKey("keep_screen_on_restore")
         val DAILY_GOAL = intPreferencesKey("daily_goal")
         val WIDGET_BACKGROUND = stringPreferencesKey("widget_background")
