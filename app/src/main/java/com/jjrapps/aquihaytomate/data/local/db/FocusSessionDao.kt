@@ -1,3 +1,4 @@
+
 package com.jjrapps.aquihaytomate.data.local.db
 
 import androidx.room.Dao
@@ -74,4 +75,12 @@ interface FocusSessionDao {
 
     @Query("DELETE FROM focus_session")
     suspend fun deleteAll()
+
+    // Backup and restore
+
+    @Query("SELECT * FROM focus_session ORDER BY started_at_epoch_ms, slot_index")
+    suspend fun allSessions(): List<FocusSessionEntity>
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertAll(sessions: List<FocusSessionEntity>): List<Long>
 }
