@@ -1,8 +1,12 @@
+
 package com.jjrapps.aquihaytomate.ui.settings
 
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -41,21 +45,12 @@ import com.jjrapps.aquihaytomate.ui.theme.AquiHayTomateTheme
 import com.jjrapps.aquihaytomate.ui.theme.TomateBright
 import timber.log.Timber
 
-/**
- * Where feedback goes. A constant rather than a string resource: it is the author's address, the same in
- * every language, and nothing about it is translatable.
- *
- * **The row does not show it.** An address printed in Settings is a line of text nobody needs — whoever
- * taps the row is about to read it in the To: field of their own mail app, and whoever does not tap it
- * was never going to write. Keeping it off the screen also keeps it out of screenshots.
- */
 private const val FEEDBACK_EMAIL = "jjrmobileapps@gmail.com"
 
 private val SCREEN_PADDING = 20.dp
 private val SECTION_TOP = 20.dp
 private val SECTION_BOTTOM = 8.dp
 
-/** The chip values offered for each setting. Anything outside them is a range the user never asks for. */
 private val FOCUS_MINUTES = listOf(1, 5, 10, 15, 20, 25, 30, 45, 50, 60, 90, 120)
 private val SHORT_BREAK_MINUTES = listOf(1, 2, 3, 5, 8, 10, 15, 20, 30)
 private val LONG_BREAK_MINUTES = listOf(5, 10, 15, 20, 25, 30, 45, 60)
@@ -73,6 +68,26 @@ fun SettingsScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
+
+    val exportBackup = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json"),
+    ) { uri ->
+        if (uri != null) {
+            viewModel.exportBackup(uri) {
+                Toast.makeText(context, it, Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    val importBackup = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri != null) {
+            viewModel.importBackup(uri) {
+                Toast.makeText(context, it, Toast.LENGTH_LONG).show()
+            }
+        }
+    }
 
     RefreshPermissionsOnResume(viewModel::onResume)
 
@@ -96,6 +111,14 @@ fun SettingsScreen(
         onAutoStartFocusChanged = viewModel::onAutoStartFocusChanged,
         onKeepScreenOnSelected = viewModel::onKeepScreenOnSelected,
         onLiquidAnimationChanged = viewModel::onLiquidAnimationChanged,
+        onExportBackup = {
+            exportBackup.launch("aquihaytomate-backup.json")
+        },
+        onImportBackup = {
+            importBackup.launch(
+                arrayOf("application/json", "text/json", "application/octet-stream"),
+            )
+        },
         onOpenNotificationSettings = {
             context.startActivity(
                 Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
@@ -103,14 +126,6 @@ fun SettingsScreen(
             )
         },
         onSendFeedback = { subject ->
-            // ACTION_SENDTO with a mailto: URI, so only email apps answer rather than the whole share
-            // sheet.
-            //
-            // The subject goes in the URI *and* in EXTRA_SUBJECT. Gmail parses the mailto: URI and
-            // ignores the extra — that is why the subject came through empty on the Pixel with the extra
-            // alone — while other clients read only the extra. Sending both is what makes it land
-            // everywhere. `Uri.encode` is not optional: the subject starts with «¡» and has spaces and
-            // brackets in it.
             val mailto = "mailto:$FEEDBACK_EMAIL?subject=${Uri.encode(subject)}"
             val intent = Intent(Intent.ACTION_SENDTO, mailto.toUri())
                 .putExtra(Intent.EXTRA_SUBJECT, subject)
@@ -118,7 +133,6 @@ fun SettingsScreen(
                 .onFailure { Timber.w(it, "No email app to send feedback with") }
         },
         onOpenExactAlarmSettings = {
-            // ACTION_REQUEST_SCHEDULE_EXACT_ALARM, never USE_EXACT_ALARM in the manifest. See §3.
             context.startActivity(
                 Intent(
                     Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
@@ -151,6 +165,8 @@ private fun SettingsContent(
     onAutoStartFocusChanged: (Boolean) -> Unit,
     onKeepScreenOnSelected: (KeepScreenOnMode) -> Unit,
     onLiquidAnimationChanged: (Boolean) -> Unit,
+    onExportBackup: () -> Unit,
+    onImportBackup: () -> Unit,
     onOpenNotificationSettings: () -> Unit,
     onOpenExactAlarmSettings: () -> Unit,
     onSendFeedback: (subject: String) -> Unit,
@@ -158,6 +174,7 @@ private fun SettingsContent(
 ) {
     when (state) {
         SettingsUiState.Loading -> Box(modifier.fillMaxSize())
+
         is SettingsUiState.Success -> {
             Column(
                 modifier = modifier
@@ -180,6 +197,10 @@ private fun SettingsContent(
                     onSheetRequested,
                     onOpenNotificationSettings,
                     onOpenExactAlarmSettings,
+                )
+                BackupSection(
+                    onExportBackup = onExportBackup,
+                    onImportBackup = onImportBackup,
                 )
                 AboutSection(state, onOpenChangelog, onOpenLicenses, onSendFeedback)
                 Spacer(Modifier.height(SECTION_TOP * 2))
@@ -244,8 +265,6 @@ private fun BehaviourSection(
     onAutoStartFocusChanged: (Boolean) -> Unit,
 ) {
     Section(stringResource(R.string.settings_section_behaviour)) {
-        // Two switches, one per direction of the chain. See TimerSettings.autoStartsInto for why they are
-        // not one: a break that starts by itself is welcome, a pomodoro that does is not.
         SettingsToggleRow(
             label = stringResource(R.string.settings_auto_start_break),
             sublabel = stringResource(R.string.settings_auto_start_break_sublabel),
@@ -371,8 +390,6 @@ private fun SystemSection(
         Divider()
         SettingsRow(
             label = stringResource(R.string.settings_exact_alarms),
-            // Denied is a documented degradation, not a failure: the timer still fires through the
-            // foreground service. Saying so is fairer than a bare warning.
             sublabel = if (state.exactAlarmsGranted) {
                 null
             } else {
@@ -388,14 +405,31 @@ private fun SystemSection(
 }
 
 @Composable
+private fun BackupSection(
+    onExportBackup: () -> Unit,
+    onImportBackup: () -> Unit,
+) {
+    Section(stringResource(R.string.settings_section_backup)) {
+        SettingsRow(
+            label = stringResource(R.string.settings_export_backup),
+            onClick = onExportBackup,
+        )
+        Divider()
+        SettingsRow(
+            label = stringResource(R.string.settings_import_backup),
+            sublabel = stringResource(R.string.settings_import_backup_sublabel),
+            onClick = onImportBackup,
+        )
+    }
+}
+
+@Composable
 private fun AboutSection(
     state: SettingsUiState.Success,
     onOpenChangelog: () -> Unit,
     onOpenLicenses: () -> Unit,
     onSendFeedback: (subject: String) -> Unit,
 ) {
-    // The subject carries the version because a report without it is a report you cannot act on: the
-    // author needs to know whether the bug is in what is published or in what was fixed two builds ago.
     val feedbackSubject = stringResource(
         R.string.feedback_subject,
         stringResource(R.string.app_name),
@@ -486,7 +520,6 @@ private fun Sheets(
             onDismiss = onDismiss,
         )
 
-        // Los dos selectores de sonido se quedan abiertos y suenan al tocarlos, para poder comparar.
         SettingsSheet.FocusAlertSound -> ValuePickerSheet(
             title = stringResource(R.string.settings_alert_sound_focus),
             hint = stringResource(R.string.settings_alert_sound_hint),
@@ -509,8 +542,6 @@ private fun Sheets(
             doneLabel = stringResource(R.string.action_done),
         )
 
-        // Igual que los de sonido: se quedan abiertos y suenan al tocarlos, porque «3 veces» no
-        // significa nada hasta que se oye.
         SettingsSheet.FocusAlertRepeats -> ValuePickerSheet(
             title = stringResource(R.string.settings_alert_repeats_focus),
             hint = stringResource(R.string.settings_alert_sound_hint),
@@ -585,12 +616,10 @@ private fun Section(
 private fun minutesLabel(minutes: Int): String =
     pluralStringResource(R.plurals.settings_minutes, minutes, minutes)
 
-/** "1 time" / "3 times": a bare number in the row would read as a duration next to the others. */
 @Composable
 private fun repeatsLabel(times: Int): String =
     pluralStringResource(R.plurals.settings_alert_repeats_value, times, times)
 
-/** Zero seconds is the off switch for vibration, so it reads as "off" rather than as "0 s". */
 @Composable
 private fun vibrationLabel(seconds: Int): String = if (seconds <= 0) {
     stringResource(R.string.settings_vibration_off)
@@ -627,8 +656,10 @@ private fun SettingsScreenPreview() {
             onAutoStartBreakChanged = {},
             onAutoStartFocusChanged = {},
             onKeepScreenOnSelected = {},
-            onSendFeedback = {},
             onLiquidAnimationChanged = {},
+            onExportBackup = {},
+            onImportBackup = {},
+            onSendFeedback = {},
             onOpenNotificationSettings = {},
             onOpenExactAlarmSettings = {},
         )
