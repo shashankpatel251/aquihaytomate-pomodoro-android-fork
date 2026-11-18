@@ -1,8 +1,11 @@
+
 package com.jjrapps.aquihaytomate.ui.settings
 
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.jjrapps.aquihaytomate.BuildConfig
+import com.jjrapps.aquihaytomate.data.backup.BackupManager
 import com.jjrapps.aquihaytomate.domain.model.AlertSound
 import com.jjrapps.aquihaytomate.domain.model.AppLanguage
 import com.jjrapps.aquihaytomate.domain.model.KeepScreenOnMode
@@ -27,6 +30,7 @@ class SettingsViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository,
     private val alarmScheduler: TimerAlarmScheduler,
     private val alertPlayer: AlertPlayer,
+    private val backupManager: BackupManager,
 ) : ViewModel() {
 
     private val openSheet = MutableStateFlow<SettingsSheet?>(null)
@@ -50,10 +54,6 @@ class SettingsViewModel @Inject constructor(
             initialValue = SettingsUiState.Loading,
         )
 
-    /**
-     * Refreshed from `onResume`: the user can grant or revoke either permission in the system settings
-     * while the app is in the background, and a stale "denied" warning is worse than none.
-     */
     fun onResume(notificationsGranted: Boolean) {
         permissions.value = PermissionState(
             notificationsGranted = notificationsGranted,
@@ -87,11 +87,6 @@ class SettingsViewModel @Inject constructor(
         playPreview(sound)
     }
 
-    /**
-     * Cuántas veces suena seguido el sonido del pomodoro. Se escucha al elegirlo, con el sonido que ese
-     * extremo tenga configurado: el número solo significa algo al oír el resultado, igual que pasaba con
-     * los nombres de los sonidos.
-     */
     fun onFocusAlertRepeatsSelected(count: Int) = update {
         settingsRepository.setFocusAlertRepeats(count)
         val settings = settingsRepository.current()
@@ -104,21 +99,11 @@ class SettingsViewModel @Inject constructor(
         playPreview(settings.breakAlertSound, repeats = count)
     }
 
-    /**
-     * Lo hace sonar al elegirlo. Antes se podía cambiar el sonido pero no oírlo, así que la lista de
-     * nombres no servía de nada: nadie sabe qué es «Suave» hasta que lo escucha.
-     *
-     * Sin vibración —cero segundos—, porque lo que se está eligiendo es el sonido, y suena por el mismo
-     * camino que la alerta de verdad, de modo que respeta el silencio y el volumen de alarma igual que
-     * ella. Si el móvil está en silencio no se oye nada, que es exactamente lo que pasará al terminar el
-     * pomodoro.
-     */
     private suspend fun playPreview(sound: AlertSound, repeats: Int = 1) {
         alertPlayer.stop()
         if (sound.isAudible) alertPlayer.play(sound, vibrationSeconds = 0, repeats = repeats)
     }
 
-    /** Corta la escucha al cerrar el selector, para que no siga sonando por encima de la app. */
     fun onSheetDismissed() {
         alertPlayer.stop()
         openSheet.value = null
@@ -150,6 +135,34 @@ class SettingsViewModel @Inject constructor(
 
     fun onLiquidAnimationChanged(enabled: Boolean) = update {
         settingsRepository.setLiquidAnimationEnabled(enabled)
+    }
+
+    // Backup export
+
+    fun exportBackup(uri: Uri, onResult: (String) -> Unit) {
+        viewModelScope.launch {
+            val message = runCatching {
+                backupManager.exportTo(uri)
+                "Backup exported."
+            }.getOrElse {
+                "Export failed: ${it.message ?: "unknown error"}"
+            }
+            onResult(message)
+        }
+    }
+
+    // Backup import
+
+    fun importBackup(uri: Uri, onResult: (String) -> Unit) {
+        viewModelScope.launch {
+            val message = runCatching {
+                val result = backupManager.importFrom(uri)
+                "Imported ${result.inserted} sessions; skipped ${result.skipped} duplicates. Settings restored."
+            }.getOrElse {
+                "Import failed: ${it.message ?: "unknown error"}"
+            }
+            onResult(message)
+        }
     }
 
     private fun update(block: suspend () -> Unit) {
