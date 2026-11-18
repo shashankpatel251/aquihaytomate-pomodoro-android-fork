@@ -87,6 +87,7 @@
     <string name="settings_section_appearance">Apariencia</string>
     <string name="settings_section_system">Sistema</string>
     <string name="settings_section_about">Acerca de</string>
+    <string name="settings_section_backup">Copia de seguridad</string>
 
     <string name="settings_focus">Enfoque</string>
     <string name="settings_short_break">Descanso corto</string>
@@ -128,6 +129,11 @@
     <string name="settings_feedback">Enviar comentarios</string>
     <string name="settings_version">Versión</string>
     <string name="settings_version_value">%1$s (%2$d)</string>
+
+    <!-- Backup -->
+    <string name="settings_export_backup">Exportar copia</string>
+    <string name="settings_import_backup">Importar copia</string>
+    <string name="settings_import_backup_sublabel">El historial se combina; los ajustes se sustituyen</string>
 
     <plurals name="settings_alert_repeats_value">
         <item quantity="one">%d vez</item>
